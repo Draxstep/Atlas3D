@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-// sw.ts — Service Worker propio del Atlas 3D (Sesión 37/38).
+// sw.ts — Service Worker propio del Atlas 3D (Sesión 37).
 // Equivale al sw-propio.js del Gestor (Sesión 26), pero aquí Vite lo empaqueta:
 // puede importar módulos de Workbox y los de nuestro propio código.
 // vite-plugin-pwa inyecta la lista de precaché donde está self.__WB_MANIFEST.

@@ -24,6 +24,22 @@ import { iniciarConexion } from "./conexion";
 import { diagnosticarAR, mensajeSoporteAR, pedirSesionAR, describirErrorAR } from "./xr";
 import { iniciarCamaraDeFondo, detenerCamaraDeFondo, describirErrorCamara } from "./camara";
 
+// Punto de entrada del proyecto. El andamiaje de Vite + TypeScript + Three.js
+// se confirmó en sesiones anteriores; el Service Worker se registró en la
+// Sesión 28 y se migró a estrategias con nombre en la 31-32.
+//
+// Sesión 33: se agregó la capa de progreso en IndexedDB (favoritos, última
+// visita, nota de estudio cifrada). El catálogo real de modelos 3D —
+// dominio, vista, controlador — todavía no existe (se construye en sesiones
+// futuras del Sub-bloque B), así que esta demo usa tres IDs de prueba, tal
+// como indica la Actividad de la guía de la Sesión 33, en vez de inventar
+// archivos .glb/.gltf que no están en el proyecto.
+//
+// Sesión 34: el sw.js manual de las Sesiones 28-32 desaparece. Ahora lo
+// genera vite-plugin-pwa (Workbox integrado al build de Vite) — ver
+// vite.config.ts — y se registra con registerSW() de virtual:pwa-register
+// en vez de navigator.serviceWorker.register('/sw.js') a mano.
+
 // Sesión 40: el catálogo ya no son tres IDs de prueba: cada entrada es un modelo
 // real (piezas y enlaces) definido en src/modelos/.
 const MODELOS = CATALOGO.map((m) => ({ id: m.id, nombre: m.nombre, resumen: m.resumen }));
@@ -235,7 +251,7 @@ function pintarDetalle(): void {
 }
 
 visor.alTocarPieza((id) => sincronizarPieza(id));
-
+// (elegirModelo(CATALOGO[0].id) se llama al final del módulo: necesita los elementos del overlay AR.)
 const btnOrientacion = document.querySelector<HTMLButtonElement>("#btn-orientacion")!;
 const btnCalibrar = document.querySelector<HTMLButtonElement>("#btn-calibrar")!;
 const lecturaVisor = document.querySelector<HTMLElement>("#lectura-visor")!;

@@ -108,12 +108,17 @@ export function crearVisor(contenedor: HTMLElement): Visor {
   let objetivoY = 0;
   let porSensores = false;
 
+  // Sesión 42 (hallazgo de Lighthouse): dibujar 60 veces por segundo una escena QUIETA gasta batería y
+  // ocupa el hilo principal. Se dibuja solo si algo cambió: «sucio» lo anota quien cambia algo.
+  let sucio = true;
+
   function ajustarTamano() {
     const ancho = contenedor.clientWidth || 320;
     const alto = Math.min(Math.round(ancho * 0.75), 560);
     renderer.setSize(ancho, alto);
     camara.aspect = ancho / alto;
     camara.updateProjectionMatrix();
+    sucio = true;
   }
   ajustarTamano();
   window.addEventListener("resize", ajustarTamano);
@@ -125,9 +130,13 @@ export function crearVisor(contenedor: HTMLElement): Visor {
       // Interpolación: alcanza el objetivo poco a poco (filtra el temblor del sensor).
       grupo.rotation.x += (objetivoX - grupo.rotation.x) * 0.15;
       grupo.rotation.y += (objetivoY - grupo.rotation.y) * 0.15;
+      sucio = true; // con sensores la escena se mueve sola
     }
-    controles.update();
-    renderer.render(escena, camara);
+    const camaraSeMovio = controles.update(); // true mientras el usuario (o la inercia) mueve la cámara
+    if (sucio || camaraSeMovio) {
+      sucio = false;
+      renderer.render(escena, camara);
+    }
   }
   bucle();
 
@@ -192,7 +201,7 @@ export function crearVisor(contenedor: HTMLElement): Visor {
     reticula.visible = false;
     escena.add(reticula);
 
-    // Sin hit-test no hay superficie que buscar: el modelo se coloca delante, como en la Sesión 38.
+    // Sin hit-test no hay superficie que buscar: el cubo se coloca delante, como en la Sesión 38.
     if (fase === "colocado") {
       raiz.matrix.makeTranslation(0, -0.5, -1.5);
     } else {
@@ -205,9 +214,11 @@ export function crearVisor(contenedor: HTMLElement): Visor {
       try {
         const espacioViewer = await sesion.requestReferenceSpace("viewer");
         try {
+          // «plane» exige que el sistema haya reconocido un plano (tarda y falla en superficies lisas);
+          // «point» acepta también puntos de característica sueltos: el anillo sale casi de inmediato.
           fuente = (await sesion.requestHitTestSource?.({ space: espacioViewer, entityTypes: ["plane", "point"] })) ?? null;
         } catch {
-          fuente = (await sesion.requestHitTestSource?.({ space: espacioViewer })) ?? null;
+          fuente = (await sesion.requestHitTestSource?.({ space: espacioViewer })) ?? null; // el navegador no admite «point»
         }
       } catch {
         fuente = null;
@@ -231,7 +242,7 @@ export function crearVisor(contenedor: HTMLElement): Visor {
       if (fuente && !hayImpacto && !sinSuperficie) return; // no hay superficie: no se coloca en el aire (todavía)
       if (hayImpacto) {
         impacto = ultimoImpacto;
-        raiz.matrix.copy(reticula.matrix); // el modelo aparece donde está la retícula
+        raiz.matrix.copy(reticula.matrix); // el cubo aparece donde está la retícula
       } else {
         // Plan B (sin hit-test, o sin superficie tras varios segundos): delante de la mirada actual, a 1,5 m.
         const posicion = new THREE.Vector3().setFromMatrixPosition(camara.matrixWorld);
@@ -383,6 +394,7 @@ export function crearVisor(contenedor: HTMLElement): Visor {
           anotar("fin-6-tamano");
           ajustarTamano(); // el visor XR cambió el tamaño del canvas
           anotar("fin-7-bucle");
+          sucio = true; // el lienzo se vació al salir de AR: hay que dibujar de nuevo
           bucle(); // vuelve el requestAnimationFrame normal
           anotar(PASO_FINAL);
         }, 250);
@@ -421,6 +433,7 @@ export function crearVisor(contenedor: HTMLElement): Visor {
   function seleccionar(id: string | null) {
     piezaElegida = id;
     modelo?.resaltar(id);
+    sucio = true;
   }
 
   function mostrarModelo(def: DefinicionModelo) {
@@ -429,6 +442,7 @@ export function crearVisor(contenedor: HTMLElement): Visor {
       modelo.destruir();
     }
     modelo = construirModelo(def);
+    sucio = true;
     grupo.add(modelo.raiz);
     centroY = modelo.centroY;
     piezaElegida = null;
@@ -456,6 +470,7 @@ export function crearVisor(contenedor: HTMLElement): Visor {
     },
     controlPorSensores(activo) {
       porSensores = activo;
+      sucio = true;
       controles.enabled = !activo;
       if (!activo) grupo.rotation.set(0, 0, 0);
     },
@@ -464,6 +479,7 @@ export function crearVisor(contenedor: HTMLElement): Visor {
     },
     fondoTransparente(activo) {
       escena.background = activo ? null : COLOR_FONDO;
+      sucio = true;
     },
     entrarEnAR,
     enAR() {

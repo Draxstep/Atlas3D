@@ -1,13 +1,132 @@
 import "./style.css";
+import {
+  abrirBaseDeDatos,
+  marcarModeloVisto,
+  alternarFavorito,
+  obtenerTodoElProgreso,
+  guardarNotaDeEstudio,
+} from "./db";
+import type { ProgresoModelo } from "./db";
+import { derivarClaveDesdeContrasena, cifrarTexto, descifrarTexto, obtenerOCrearSal } from "./crypto";
 
-document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
-  <main class="arranque">
-    <h1>Atlas 3D de Arquitectura de Software</h1>
-    <p>Proyecto inicializado con Vite, TypeScript, Three.js y Web App Manifest.</p>
-  </main>
-`;
+// Sesión 33: capa de progreso en IndexedDB (favoritos, última visita, nota de estudio cifrada).
+// El catálogo real de modelos 3D todavía no existe, así que se usan tres IDs de prueba.
+const MODELOS = [
+  { id: "modelo-demo-1", nombre: "Patrón MVC" },
+  { id: "modelo-demo-2", nombre: "Arquitectura en capas" },
+  { id: "modelo-demo-3", nombre: "Microservicios" },
+];
 
-// Registro del Service Worker — Sesión 28.
+const appEl = document.querySelector<HTMLDivElement>("#app")!;
+let db: IDBDatabase;
+let claveSesion: CryptoKey | null = null;
+let progresoPorId = new Map<string, ProgresoModelo>();
+
+async function obtenerClaveSesion(): Promise<CryptoKey | null> {
+  if (claveSesion) return claveSesion;
+  const contrasena = window.prompt(
+    "Contraseña para cifrar/descifrar la nota de estudio (la misma cada vez — no se guarda en ningún lado):"
+  );
+  if (!contrasena) return null;
+  const sal = obtenerOCrearSal();
+  claveSesion = await derivarClaveDesdeContrasena(contrasena, sal);
+  return claveSesion;
+}
+
+function render() {
+  appEl.innerHTML = `
+    <div class="atlas-demo">
+      <h1>Atlas 3D de Arquitectura de Software</h1>
+      <p class="aviso-demo">
+        Marca cada modelo como visto, guárdalo como favorito o escribe una nota de estudio (se cifra en tu dispositivo).
+      </p>
+      <div class="modelos-grid">
+        ${MODELOS.map((m) => {
+          const p = progresoPorId.get(m.id);
+          const favorito = p?.favorito ?? false;
+          const ultimaVisita = p?.ultimaVisita ? new Date(p.ultimaVisita).toLocaleString() : "nunca";
+          const tieneNota = !!p?.notaCifrada;
+          return `
+            <article class="modelo-card" data-id="${m.id}">
+              <h2>${m.nombre}</h2>
+              <p class="meta">Última visita: ${ultimaVisita}</p>
+              <div class="acciones">
+                <button class="btn-visitar" data-id="${m.id}">Marcar como visto</button>
+                <button class="btn-favorito" data-id="${m.id}">${favorito ? "★ Favorito" : "☆ Marcar favorito"}</button>
+              </div>
+              <div class="nota-zona">
+                <input type="text" class="nota-input" placeholder="Nota de estudio..." />
+                <button class="btn-guardar-nota" data-id="${m.id}">🔒 Guardar nota</button>
+                <button class="btn-ver-nota" data-id="${m.id}" ${tieneNota ? "" : "disabled"}>👁 Ver nota</button>
+              </div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `;
+
+  appEl.querySelectorAll<HTMLButtonElement>(".btn-visitar").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id!;
+      const registro = await marcarModeloVisto(db, id);
+      progresoPorId.set(id, registro);
+      render();
+    })
+  );
+
+  appEl.querySelectorAll<HTMLButtonElement>(".btn-favorito").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id!;
+      await alternarFavorito(db, id);
+      const todo = await obtenerTodoElProgreso(db);
+      progresoPorId = new Map(todo.map((p) => [p.modeloId, p]));
+      render();
+    })
+  );
+
+  appEl.querySelectorAll<HTMLButtonElement>(".btn-guardar-nota").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id!;
+      const card = btn.closest(".modelo-card")!;
+      const input = card.querySelector<HTMLInputElement>(".nota-input")!;
+      if (!input.value.trim()) return;
+      const clave = await obtenerClaveSesion();
+      if (!clave) return;
+      await guardarNotaDeEstudio(db, clave, id, input.value, cifrarTexto);
+      const todo = await obtenerTodoElProgreso(db);
+      progresoPorId = new Map(todo.map((p) => [p.modeloId, p]));
+      render();
+    })
+  );
+
+  appEl.querySelectorAll<HTMLButtonElement>(".btn-ver-nota").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id!;
+      const p = progresoPorId.get(id);
+      if (!p?.notaCifrada || !p.notaIv) return;
+      const clave = await obtenerClaveSesion();
+      if (!clave) return;
+      try {
+        const texto = await descifrarTexto(clave, { cifrado: p.notaCifrada, iv: p.notaIv });
+        window.alert(`Nota de estudio de "${id}":\n\n${texto}`);
+      } catch {
+        window.alert("No se pudo descifrar — la contraseña ingresada no es la correcta.");
+      }
+    })
+  );
+}
+
+async function iniciar() {
+  db = await abrirBaseDeDatos();
+  const todo = await obtenerTodoElProgreso(db);
+  progresoPorId = new Map(todo.map((p) => [p.modeloId, p]));
+  render();
+}
+
+void iniciar();
+
+// Registro del Service Worker manual — Sesión 28-32.
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker
     .register("/sw.js")

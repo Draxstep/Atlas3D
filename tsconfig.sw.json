@@ -1,9 +1,17 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "lib": ["ES2020", "WebWorker"],
+    "lib": [
+      "ES2020",
+      "WebWorker"
+    ],
     "types": []
   },
-  "include": ["sw-env.d.ts", "src/sw.ts", "src/db.ts", "src/descargas.ts"],
+  "include": [
+    "sw-env.d.ts",
+    "src/sw.ts",
+    "src/db.ts",
+    "src/descargas.ts"
+  ],
   "exclude": []
 }

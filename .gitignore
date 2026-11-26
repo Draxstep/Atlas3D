@@ -303,3 +303,8 @@ Temporary Items
 .apdisk
 
 # End of https://www.toptal.com/developers/gitignore/api/react,reactnative,angular
+# Angular CLI build/cache
+/.angular/cache
+/tmp
+/out-tsc
+/bazel-out

@@ -9,29 +9,28 @@ import {
   encolarDescargas,
   obtenerDescargas,
 } from "./db";
-import type { ProgresoModelo } from "./db";
 import { derivarClaveDesdeContrasena, cifrarTexto, descifrarTexto, obtenerOCrearSal } from "./crypto";
+import type { ProgresoModelo } from "./db";
 import { crearVisor, type EstadoAR } from "./visor";
 import { pedirPermisoOrientacion, hayOrientacionReal, iniciarControlOrientacion } from "./sensores";
 import type { ControlOrientacion } from "./sensores";
-import { iniciarCamaraDeFondo, detenerCamaraDeFondo, describirErrorCamara } from "./camara";
 import { estadoAvisos, pedirPermisoAvisos, mostrarAviso } from "./avisos";
-import { ETIQUETA_SYNC, descargarPendientes } from "./descargas";
+import { ETIQUETA_SYNC, descargarPendientes, leerFicha } from "./descargas";
+import { CATALOGO, modeloPorId } from "./modelos";
+import { ROLES, type Ficha } from "./modelos/tipos";
+import { describirRastro, leerRastro, PASO_FINAL } from "./rastro";
 import { diagnosticarAR, mensajeSoporteAR, pedirSesionAR, describirErrorAR } from "./xr";
+import { iniciarCamaraDeFondo, detenerCamaraDeFondo, describirErrorCamara } from "./camara";
 
-// Sesión 33/37: capa de progreso en IndexedDB + descargas de fichas bajo demanda.
-const MODELOS = [
-  { id: "modelo-demo-1", nombre: "Patrón MVC" },
-  { id: "modelo-demo-2", nombre: "Arquitectura en capas" },
-  { id: "modelo-demo-3", nombre: "Microservicios" },
-];
-const MODELOS_IDS = MODELOS.map((m) => m.id);
+// Sesión 40: el catálogo ya no son tres IDs de prueba: cada entrada es un modelo
+// real (piezas y enlaces) definido en src/modelos/.
+const MODELOS = CATALOGO.map((m) => ({ id: m.id, nombre: m.nombre, resumen: m.resumen }));
 
 const appEl = document.querySelector<HTMLDivElement>("#app")!;
 let db: IDBDatabase;
 let claveSesion: CryptoKey | null = null;
 let progresoPorId = new Map<string, ProgresoModelo>();
-let modelosDescargados = new Set<string>();
+let modelosDescargados = new Set<string>(); // Sesión 37: fichas ya guardadas para uso sin conexión
 
 async function obtenerClaveSesion(): Promise<CryptoKey | null> {
   if (claveSesion) return claveSesion;
@@ -60,8 +59,10 @@ function render() {
           return `
             <article class="modelo-card" data-id="${m.id}">
               <h2>${m.nombre}</h2>
+              <p class="resumen-card">${m.resumen}</p>
               <p class="meta">Última visita: ${ultimaVisita}${modelosDescargados.has(m.id) ? ' · <span class="disponible">✓ disponible sin conexión</span>' : ""}</p>
               <div class="acciones">
+                <button class="btn-ver3d" data-id="${m.id}">🧊 Ver en 3D</button>
                 <button class="btn-visitar" data-id="${m.id}">Marcar como visto</button>
                 <button class="btn-favorito" data-id="${m.id}">${favorito ? "★ Favorito" : "☆ Marcar favorito"}</button>
               </div>
@@ -76,6 +77,13 @@ function render() {
       </div>
     </div>
   `;
+
+  appEl.querySelectorAll<HTMLButtonElement>(".btn-ver3d").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      elegirModelo(btn.dataset.id!);
+      document.querySelector("#visor")?.scrollIntoView({ block: "center", behavior: "smooth" });
+    })
+  );
 
   appEl.querySelectorAll<HTMLButtonElement>(".btn-visitar").forEach((btn) =>
     btn.addEventListener("click", async () => {
@@ -152,6 +160,80 @@ const dbLista = iniciar();
 
 // ── Sesión 35: visor 3D controlado por sensores de orientación ──────────────
 const visor = crearVisor(document.querySelector<HTMLElement>("#visor")!);
+
+// ── Sesión 40: panel del modelo y de la pieza elegida ───────────────────────
+const tabsModelo = document.querySelector<HTMLElement>("#tabs-modelo")!;
+const resumenModelo = document.querySelector<HTMLElement>("#modelo-resumen")!;
+const leyendaEl = document.querySelector<HTMLElement>("#leyenda")!;
+const chipsPiezas = document.querySelector<HTMLElement>("#chips-piezas")!;
+const detallePieza = document.querySelector<HTMLElement>("#pieza-detalle")!;
+let modeloActualId: string | null = null;
+let piezaActual: string | null = null;
+let fichaActual: Ficha | null = null;
+
+function elegirModelo(id: string): void {
+  const def = modeloPorId(id);
+  if (!def) return;
+  modeloActualId = id;
+  piezaActual = null;
+  fichaActual = null;
+  visor.mostrarModelo(def);
+  tabsModelo.innerHTML = CATALOGO.map((m) => `<button type="button" class="tab" data-id="${m.id}" aria-pressed="${m.id === id}">${m.nombre}</button>`).join("");
+  tabsModelo.querySelectorAll<HTMLButtonElement>(".tab").forEach((b) => b.addEventListener("click", () => elegirModelo(b.dataset.id!)));
+  resumenModelo.textContent = def.resumen;
+  const roles = [...new Set(def.piezas.map((p) => p.rol))];
+  leyendaEl.innerHTML = roles.map((r) => `<span class="leyenda-item"><i style="background:${ROLES[r].css}"></i>${ROLES[r].nombre}</span>`).join("");
+  chipsPiezas.innerHTML = def.piezas.map((p) => `<button type="button" class="chip" data-id="${p.id}" aria-pressed="false"><i style="background:${ROLES[p.rol].css}"></i>${p.nombre}</button>`).join("");
+  chipsPiezas.querySelectorAll<HTMLButtonElement>(".chip").forEach((b) =>
+    b.addEventListener("click", () => {
+      const nueva = piezaActual === b.dataset.id ? null : b.dataset.id!;
+      visor.seleccionar(nueva);
+      sincronizarPieza(nueva);
+    })
+  );
+  pintarDetalle();
+  pintarPiezaAR();
+  // La ficha ampliada llega de la caché (sin conexión) o de la red; si no hay ninguna, se usa solo el código.
+  void leerFicha(id).then((f) => {
+    if (modeloActualId !== id) return;
+    fichaActual = f;
+    pintarDetalle();
+    pintarPiezaAR();
+  });
+}
+
+/** Refleja en la interfaz la pieza que ya resaltó el visor. */
+function sincronizarPieza(id: string | null): void {
+  piezaActual = id;
+  chipsPiezas.querySelectorAll<HTMLButtonElement>(".chip").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.id === id)));
+  pintarDetalle();
+  pintarPiezaAR();
+}
+
+function nombresDe(def: NonNullable<ReturnType<typeof modeloPorId>>, ids: string[]): string {
+  return ids.map((x) => def.piezas.find((p) => p.id === x)?.nombre ?? x).join(", ");
+}
+
+function pintarDetalle(): void {
+  const def = modeloPorId(modeloActualId ?? "");
+  if (!def) return;
+  const pieza = def.piezas.find((p) => p.id === piezaActual);
+  const extra = pieza ? fichaActual?.piezas[pieza.id] : null;
+  const sinFicha = fichaActual ? "" : '<p class="nota-ficha">Detalle ampliado no disponible: descarga las fichas (abajo) para leerlo sin conexión.</p>';
+  if (pieza) {
+    detallePieza.innerHTML =
+      `<h3><i style="background:${ROLES[pieza.rol].css}"></i>${pieza.nombre} <small>${ROLES[pieza.rol].nombre}</small></h3>` +
+      `<p>${pieza.resumen}</p>` +
+      (extra ? `<p><b>Responsabilidad.</b> ${extra.responsabilidad}</p><p><b>Habla con:</b> ${nombresDe(def, extra.habla_con)}.</p>` : sinFicha);
+  } else {
+    detallePieza.innerHTML =
+      "<p>Toca una pieza del modelo, o elígela en la lista, para ver qué hace. Toca la misma pieza otra vez para soltarla.</p>" +
+      (fichaActual ? `<p><b>Cuándo usarlo.</b> ${fichaActual.cuando_usarlo}</p><p><b>Riesgo.</b> ${fichaActual.riesgo}</p>` : sinFicha);
+  }
+}
+
+visor.alTocarPieza((id) => sincronizarPieza(id));
+
 const btnOrientacion = document.querySelector<HTMLButtonElement>("#btn-orientacion")!;
 const btnCalibrar = document.querySelector<HTMLButtonElement>("#btn-calibrar")!;
 const lecturaVisor = document.querySelector<HTMLElement>("#lectura-visor")!;
@@ -241,6 +323,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 // ── Sesión 37: avisos y descargas para uso sin conexión ─────────────────────
+const MODELOS_IDS = MODELOS.map((m) => m.id);
 const btnAvisos = document.querySelector<HTMLButtonElement>("#btn-avisos")!;
 const btnDescargar = document.querySelector<HTMLButtonElement>("#btn-descargar")!;
 const estadoAvisosEl = document.querySelector<HTMLElement>("#estado-avisos")!;
@@ -326,17 +409,48 @@ const overlayAR = document.querySelector<HTMLElement>("#xr-overlay")!;
 const btnSalirAR = document.querySelector<HTMLButtonElement>("#btn-salir-ar")!;
 const xrEstado = document.querySelector<HTMLElement>("#xr-estado")!;
 const xrDatos = document.querySelector<HTMLElement>("#xr-datos")!;
+const xrPieza = document.querySelector<HTMLElement>("#xr-pieza")!;
+const btnPiezaAnt = document.querySelector<HTMLButtonElement>("#btn-pieza-ant")!;
+const btnPiezaSig = document.querySelector<HTMLButtonElement>("#btn-pieza-sig")!;
+
+// En AR un toque sobre el modelo coloca o recoloca: no puede elegir piezas. Se eligen con ◀ ▶
+// (botones del overlay), que recorren las piezas una por una: ninguna → 1.ª → 2.ª … → ninguna.
+function recorrerPiezas(paso: number): void {
+  const def = modeloPorId(modeloActualId ?? "");
+  if (!def) return;
+  const ids: (string | null)[] = [null, ...def.piezas.map((p) => p.id)];
+  const i = ids.indexOf(piezaActual);
+  const siguiente = ids[(i + paso + ids.length) % ids.length];
+  visor.seleccionar(siguiente);
+  sincronizarPieza(siguiente);
+}
+btnPiezaAnt.addEventListener("click", () => recorrerPiezas(-1));
+btnPiezaSig.addEventListener("click", () => recorrerPiezas(1));
+
+function pintarPiezaAR(): void {
+  const def = modeloPorId(modeloActualId ?? "");
+  const pieza = def?.piezas.find((p) => p.id === piezaActual);
+  const extra = pieza ? fichaActual?.piezas[pieza.id] : null;
+  const texto = pieza ? `${pieza.nombre}: ${extra ? extra.responsabilidad : pieza.resumen}` : `${def?.nombre ?? "Modelo"}. Usa ◀ ▶ para recorrer sus piezas.`;
+  if (xrPieza.textContent !== texto) xrPieza.textContent = texto;
+}
+let sesionAR: XRSession | null = null;
+
 const diagAR = document.querySelector<HTMLElement>("#diag-ar")!;
 const detallesAR = document.querySelector<HTMLDetailsElement>(".diag-ar")!;
 const btnRecomprobar = document.querySelector<HTMLButtonElement>("#btn-recomprobar")!;
-let sesionAR: XRSession | null = null;
 
+// ¿Se puede? El botón solo se habilita si la respuesta es «sí». Se pregunta al
+// cargar, al pulsar «Comprobar de nuevo» y cuando el navegador avisa de que
+// cambió el dispositivo XR (así funciona también si activas el emulador después).
 async function comprobarAR(): Promise<void> {
   const { estado, lineas } = await diagnosticarAR();
   estadoAR.textContent = mensajeSoporteAR(estado);
-  diagAR.textContent = lineas.join("\n");
+  diagAR.textContent = [...lineas, sesionAR ? "Sesión de AR en curso." : describirRastro()].join("\n");
   if (!sesionAR) btnAR.disabled = estado !== "disponible";
-  detallesAR.open = estado !== "disponible";
+  // Si no se puede, el diagnóstico se muestra abierto para ver qué comprobación falló.
+  const rastro = leerRastro();
+  detallesAR.open = estado !== "disponible" || (!sesionAR && rastro !== null && rastro.paso !== PASO_FINAL);
 }
 void comprobarAR();
 btnRecomprobar.addEventListener("click", () => void comprobarAR());
@@ -344,18 +458,18 @@ navigator.xr?.addEventListener("devicechange", () => void comprobarAR());
 
 // Texto de ayuda sobre la cámara según en qué punto va la colocación.
 function ayudaAR(e: EstadoAR): string {
-  if (!e.hitTest) return "Este dispositivo no ofrece hit-test: el cubo está a 1,5 m delante. Toca para traerlo delante de ti.";
+  if (!e.hitTest) return "Este dispositivo no ofrece hit-test: el modelo está a 1,5 m delante. Toca para traerlo delante de ti.";
   switch (e.fase) {
     case "buscando":
       return e.sinSuperficie
-        ? "No encuentro superficies. Prueba con una zona con textura y buena luz, o toca la pantalla para colocar el cubo delante de ti."
+        ? "No encuentro superficies. Prueba con una zona con textura y buena luz, o toca la pantalla para colocar el modelo delante de ti."
         : "Mueve el teléfono despacio hasta ver el anillo verde sobre una superficie.";
     case "listo":
-      return "Toca la pantalla para colocar el cubo.";
+      return "Toca la pantalla para colocar el modelo.";
     case "colocado":
       return e.overlay
         ? "Arrastra para moverlo, gira con dos dedos, pellizca para el tamaño. Toca otro punto para recolocarlo."
-        : "Cubo colocado. Toca otro punto para recolocarlo.";
+        : "Modelo colocado. Toca otro punto para recolocarlo.";
   }
 }
 
@@ -432,16 +546,21 @@ btnAR.addEventListener("click", async () => {
 // Un toque sobre un botón del overlay NO debe contar como «tocar para colocar»:
 // el navegador avisa con `beforexrselect` y basta cancelarlo.
 btnSalirAR.addEventListener("beforexrselect", (e) => e.preventDefault());
+// Lo mismo para los botones ◀ ▶ de las piezas: el toque es del botón, no de la escena.
+[btnPiezaAnt, btnPiezaSig].forEach((b) => b.addEventListener("beforexrselect", (e) => e.preventDefault()));
 
 btnSalirAR.addEventListener("click", () => {
   void sesionAR?.end();
 });
 
-// Registro del Service Worker — Sesión 34/37: injectManifest (src/sw.ts).
+// Registro del Service Worker — Sesión 34. Desde la Sesión 37 el archivo es
+// src/sw.ts (escrito a mano); registerSW() sigue igual.
 registerSW({
   immediate: true,
   onOfflineReady() {
+    // Primera vez que el precaché quedó completo.
     estadoDescargaEl.textContent = "✓ La app ya funciona sin conexión.";
+    // El usuario está mirando la pantalla: la notificación solo si NO la está mirando.
     if (document.visibilityState !== "visible") {
       void mostrarAviso("Atlas 3D listo", "Ya funciona sin conexión.", import.meta.env.BASE_URL, "atlas-offline");
     }
@@ -453,3 +572,6 @@ registerSW({
     console.error("Error al registrar el SW de Workbox:", error);
   },
 });
+
+// Sesión 40: al arrancar se muestra el primer modelo del catálogo.
+elegirModelo(CATALOGO[0].id);

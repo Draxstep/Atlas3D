@@ -9,7 +9,7 @@ body {
   margin: 0;
   min-height: 100vh;
   display: flex;
-  flex-direction: column;
+  flex-direction: column; /* Sesión 35: visor arriba, demo de progreso debajo */
   align-items: center;
   justify-content: flex-start;
   text-align: left;
@@ -128,3 +128,14 @@ body {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* Sesión 35: visor 3D y controles de sensores */
+.visor-zona { max-width: 40em; margin: 1.2em auto 0; padding: 0 1em; width: 100%; box-sizing: border-box; }
+.visor { position: relative; width: 100%; border-radius: 12px; overflow: hidden; border: 1px solid #2a3550; background: #0b1220; }
+.visor canvas { position: relative; z-index: 1; display: block; width: 100%; touch-action: none; }
+.visor-barra { display: flex; flex-wrap: wrap; gap: .5em; align-items: center; margin-bottom: .6em; }
+.visor-barra button { background: #162038; color: #e8e2cf; border: 1px solid #2a3550; border-radius: 8px; padding: .45em .8em; cursor: pointer; }
+.visor-barra button:disabled { opacity: .45; cursor: not-allowed; }
+.lectura-visor { font-size: .8em; color: #9fb0d0; font-variant-numeric: tabular-nums; }
+.aviso-visor { background: #3a2f10; border: 1px solid #b8860b; border-radius: 8px; padding: .5em .8em; font-size: .85em; }
+#app { width: 100%; }

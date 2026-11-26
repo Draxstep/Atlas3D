@@ -9,9 +9,11 @@ import {
 } from "./db";
 import type { ProgresoModelo } from "./db";
 import { derivarClaveDesdeContrasena, cifrarTexto, descifrarTexto, obtenerOCrearSal } from "./crypto";
+import { crearVisor } from "./visor";
+import { pedirPermisoOrientacion, hayOrientacionReal, iniciarControlOrientacion } from "./sensores";
+import type { ControlOrientacion } from "./sensores";
 
 // Sesión 33: capa de progreso en IndexedDB (favoritos, última visita, nota de estudio cifrada).
-// El catálogo real de modelos 3D todavía no existe, así que se usan tres IDs de prueba.
 const MODELOS = [
   { id: "modelo-demo-1", nombre: "Patrón MVC" },
   { id: "modelo-demo-2", nombre: "Arquitectura en capas" },
@@ -126,6 +128,56 @@ async function iniciar() {
 }
 
 void iniciar();
+
+// ── Sesión 35: visor 3D controlado por sensores de orientación ──────────────
+const visor = crearVisor(document.querySelector<HTMLElement>("#visor")!);
+const btnOrientacion = document.querySelector<HTMLButtonElement>("#btn-orientacion")!;
+const btnCalibrar = document.querySelector<HTMLButtonElement>("#btn-calibrar")!;
+const lecturaVisor = document.querySelector<HTMLElement>("#lectura-visor")!;
+const avisoVisor = document.querySelector<HTMLElement>("#aviso-visor")!;
+let control: ControlOrientacion | null = null;
+let timerLectura = 0;
+
+function avisarVisor(texto: string) {
+  avisoVisor.textContent = texto;
+  avisoVisor.hidden = !texto;
+}
+
+function apagarSensores() {
+  control?.detener();
+  control = null;
+  window.clearInterval(timerLectura);
+  visor.controlPorSensores(false);
+  lecturaVisor.textContent = "";
+  btnCalibrar.disabled = true;
+  btnOrientacion.textContent = "📱 Rotar con el teléfono";
+}
+
+btnOrientacion.addEventListener("click", async () => {
+  if (control) {
+    apagarSensores(); // segundo clic: volver al control manual
+    return;
+  }
+  const permiso = await pedirPermisoOrientacion();
+  if (permiso === "denied") {
+    avisarVisor("Denegaste el acceso a los sensores. Sigue disponible el control con ratón o dedo.");
+    return;
+  }
+  if (permiso === "no-soportado" || !(await hayOrientacionReal())) {
+    avisarVisor("Este dispositivo no tiene sensores de orientación. Usa el ratón o el dedo para girar el visor.");
+    return;
+  }
+  avisarVisor("");
+  visor.controlPorSensores(true);
+  control = iniciarControlOrientacion((x, y) => visor.rotarHacia(x, y));
+  btnCalibrar.disabled = false;
+  btnOrientacion.textContent = "📱 Sensores: ACTIVOS (toca para apagar)";
+  timerLectura = window.setInterval(() => {
+    const { x, y } = visor.rotacionActualGrados();
+    lecturaVisor.textContent = `rotación X ${x}° · Y ${y}°`;
+  }, 150);
+});
+btnCalibrar.addEventListener("click", () => control?.calibrar());
 
 // Registro del Service Worker — Sesión 34: generado por Workbox (vite-plugin-pwa).
 registerSW({

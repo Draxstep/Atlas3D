@@ -229,8 +229,11 @@ captures/
 *.apk
 output.json
 
-.docs
-.referencia
+/docs/*.docx
+/referencia/
+*.zip
+*.docx
+.DS_Store
 # IntelliJ
 *.iml
 misc.xml

@@ -11,6 +11,8 @@ export interface Visor {
   controlPorSensores(activo: boolean): void;
   /** Rotación actual del modelo, en grados (para mostrarla en pantalla). */
   rotacionActualGrados(): { x: number; y: number };
+  /** true: sin color de fondo (se ve el video detrás). false: fondo azul oscuro. */
+  fondoTransparente(activo: boolean): void;
   destruir(): void;
 }
 
@@ -87,6 +89,9 @@ export function crearVisor(contenedor: HTMLElement): Visor {
     },
     rotacionActualGrados() {
       return { x: aGrados(grupo.rotation.x), y: aGrados(grupo.rotation.y) };
+    },
+    fondoTransparente(activo) {
+      escena.background = activo ? null : COLOR_FONDO;
     },
     destruir() {
       cancelAnimationFrame(animacion);

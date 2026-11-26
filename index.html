@@ -13,11 +13,14 @@
       <div class="visor-barra">
         <button type="button" id="btn-orientacion">📱 Rotar con el teléfono</button>
         <button type="button" id="btn-calibrar" disabled>Calibrar</button>
+        <button type="button" id="btn-camara">📷 Cámara de fondo</button>
         <span id="lectura-visor" class="lectura-visor"></span>
       </div>
       <p id="aviso-visor" class="aviso-visor" role="status" hidden></p>
-      <div id="visor" class="visor"></div>
-      <p class="aviso-demo">Cubo de prueba del visor 3D (Sesión 35): usa el ratón o el dedo para girarlo, o activa los sensores de orientación.</p>
+      <div id="visor" class="visor">
+        <video id="fondo-camara" class="fondo-camara" playsinline muted hidden></video>
+      </div>
+      <p class="aviso-demo">Cubo de prueba del visor 3D (Sesión 36): con la cámara de fondo NO es realidad aumentada todavía, el cubo solo se dibuja encima del video.</p>
     </section>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>

@@ -12,6 +12,27 @@ const ICON_ASSETS = [
   "/iconos/icon-512-maskable.png",
 ];
 
+function cacheOnly(peticion) {
+  return caches.match(peticion);
+}
+
+function networkOnly(peticion) {
+  return fetch(peticion);
+}
+
+function cacheFirst(peticion) {
+  return caches.match(peticion).then((enCache) => {
+    if (enCache) return enCache;
+    return fetch(peticion).then((respuesta) => {
+      if (respuesta.ok) {
+        const clon = respuesta.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(peticion, clon));
+      }
+      return respuesta;
+    });
+  });
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(async (cache) => {
@@ -40,9 +61,5 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  event.respondWith(
-    caches.match(event.request).then(
-      (encontrado) => encontrado || fetch(event.request)
-    )
-  );
+  event.respondWith(cacheFirst(event.request));
 });

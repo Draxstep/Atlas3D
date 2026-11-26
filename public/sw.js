@@ -33,6 +33,31 @@ function cacheFirst(peticion) {
   });
 }
 
+function networkFirst(peticion) {
+  return fetch(peticion)
+    .then((respuesta) => {
+      if (respuesta.ok) {
+        const clon = respuesta.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(peticion, clon));
+      }
+      return respuesta;
+    })
+    .catch(() => caches.match(peticion));
+}
+
+function staleWhileRevalidate(peticion) {
+  return caches.match(peticion).then((enCache) => {
+    const descarga = fetch(peticion).then((respuesta) => {
+      if (respuesta.ok) {
+        const clon = respuesta.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(peticion, clon));
+      }
+      return respuesta;
+    });
+    return enCache || descarga;
+  });
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(async (cache) => {
@@ -61,5 +86,15 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  event.respondWith(cacheFirst(event.request));
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith("/iconos/")) {
+    // Íconos y, más adelante, modelos: inmutables -> Cache First
+    event.respondWith(cacheFirst(event.request));
+  } else if (url.pathname.startsWith("/api/")) {
+    // Futuro catálogo de modelos: debe verse al día -> Network First
+    event.respondWith(networkFirst(event.request));
+  } else {
+    // Shell (HTML, manifest): rápido, y se actualiza solo -> Stale-While-Revalidate
+    event.respondWith(staleWhileRevalidate(event.request));
+  }
 });

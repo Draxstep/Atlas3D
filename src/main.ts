@@ -17,6 +17,7 @@ import type { ControlOrientacion } from "./sensores";
 import { iniciarCamaraDeFondo, detenerCamaraDeFondo, describirErrorCamara } from "./camara";
 import { estadoAvisos, pedirPermisoAvisos, mostrarAviso } from "./avisos";
 import { ETIQUETA_SYNC, descargarPendientes } from "./descargas";
+import { diagnosticarAR, mensajeSoporteAR, pedirSesionAR, describirErrorAR } from "./xr";
 
 // Sesión 33/37: capa de progreso en IndexedDB + descargas de fichas bajo demanda.
 const MODELOS = [
@@ -315,7 +316,59 @@ btnDescargar.addEventListener("click", async () => {
 
 // Instalación: appinstalled se dispara cuando el usuario instala la PWA.
 window.addEventListener("appinstalled", () => {
-  void mostrarAviso("Atlas 3D instalado", "Ya puedes abrirlo desde tu pantalla de inicio.", "/", "atlas-instalado");
+  void mostrarAviso("Atlas 3D instalado", "Ya puedes abrirlo desde tu pantalla de inicio.", import.meta.env.BASE_URL, "atlas-instalado");
+});
+
+// ── Sesión 38: realidad aumentada con WebXR ─────────────────────────────────
+const btnAR = document.querySelector<HTMLButtonElement>("#btn-ar")!;
+const estadoAR = document.querySelector<HTMLElement>("#estado-ar")!;
+const overlayAR = document.querySelector<HTMLElement>("#xr-overlay")!;
+const btnSalirAR = document.querySelector<HTMLButtonElement>("#btn-salir-ar")!;
+const diagAR = document.querySelector<HTMLElement>("#diag-ar")!;
+const detallesAR = document.querySelector<HTMLDetailsElement>(".diag-ar")!;
+const btnRecomprobar = document.querySelector<HTMLButtonElement>("#btn-recomprobar")!;
+let sesionAR: XRSession | null = null;
+
+async function comprobarAR(): Promise<void> {
+  const { estado, lineas } = await diagnosticarAR();
+  estadoAR.textContent = mensajeSoporteAR(estado);
+  diagAR.textContent = lineas.join("\n");
+  if (!sesionAR) btnAR.disabled = estado !== "disponible";
+  detallesAR.open = estado !== "disponible";
+}
+void comprobarAR();
+btnRecomprobar.addEventListener("click", () => void comprobarAR());
+navigator.xr?.addEventListener("devicechange", () => void comprobarAR());
+
+btnAR.addEventListener("click", async () => {
+  avisarVisor("");
+  // La cámara del navegador y la sesión AR no pueden usarse a la vez: la AR
+  // abre la cámara por su cuenta. Se apagan también los sensores de la Sesión 35.
+  apagarCamara();
+  apagarSensores();
+  try {
+    // La petición ocurre DENTRO del clic: es el «gesto del usuario» que exige WebXR.
+    const sesion = await pedirSesionAR(overlayAR);
+    sesionAR = sesion;
+    btnAR.disabled = true;
+    await visor.entrarEnAR(sesion, () => {
+      sesionAR = null;
+      btnAR.disabled = false;
+      estadoAR.textContent = "La sesión de realidad aumentada terminó.";
+    });
+    estadoAR.textContent = sesion.domOverlayState
+      ? "Sesión de realidad aumentada activa. Usa «Salir de AR» sobre la cámara."
+      : "Sesión de realidad aumentada activa. Este navegador no mostró el botón sobre la cámara: sal con el gesto de salida del sistema.";
+  } catch (err) {
+    sesionAR?.end().catch(() => {});
+    sesionAR = null;
+    btnAR.disabled = false;
+    avisarVisor(describirErrorAR(err));
+  }
+});
+
+btnSalirAR.addEventListener("click", () => {
+  void sesionAR?.end();
 });
 
 // Registro del Service Worker — Sesión 34/37: injectManifest (src/sw.ts).
@@ -324,7 +377,7 @@ registerSW({
   onOfflineReady() {
     estadoDescargaEl.textContent = "✓ La app ya funciona sin conexión.";
     if (document.visibilityState !== "visible") {
-      void mostrarAviso("Atlas 3D listo", "Ya funciona sin conexión.", "/", "atlas-offline");
+      void mostrarAviso("Atlas 3D listo", "Ya funciona sin conexión.", import.meta.env.BASE_URL, "atlas-offline");
     }
   },
   onRegisteredSW(swUrl, registration) {

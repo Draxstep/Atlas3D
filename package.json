@@ -1,8 +1,11 @@
 {
   "name": "pwa-ar-objetos3d",
   "version": "0.0.0",
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
-    "start": "ng serve",
+    "start": "node server.mjs",
     "dev": "ng serve",
     "build": "node scripts/build.mjs",
     "preview": "npx serve dist -l 4173"

@@ -1,4 +1,5 @@
 import "./style.css";
+import { registerSW } from "virtual:pwa-register";
 import {
   abrirBaseDeDatos,
   marcarModeloVisto,
@@ -126,10 +127,13 @@ async function iniciar() {
 
 void iniciar();
 
-// Registro del Service Worker manual — Sesión 28-32.
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker
-    .register("/sw.js")
-    .then((reg) => console.log("SW registrado:", reg.scope))
-    .catch((err) => console.error("Error al registrar SW:", err));
-}
+// Registro del Service Worker — Sesión 34: generado por Workbox (vite-plugin-pwa).
+registerSW({
+  immediate: true,
+  onRegisteredSW(swUrl, registration) {
+    console.log("SW de Workbox registrado:", swUrl, registration);
+  },
+  onRegisterError(error) {
+    console.error("Error al registrar el SW de Workbox:", error);
+  },
+});
